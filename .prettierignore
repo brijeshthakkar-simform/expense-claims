@@ -1,0 +1,26 @@
+# Prettier also reads .gitignore (node_modules, .next, src/generated, coverage, next-env.d.ts, …).
+# These are listed again so the intent survives a .gitignore edit.
+node_modules/
+.next/
+out/
+build/
+coverage/
+.vitest/
+playwright-report/
+test-results/
+src/generated/
+next-env.d.ts
+pnpm-lock.yaml
+
+# Migrations are append-only once applied; their SQL is copied verbatim from the verified proof.
+prisma/migrations/
+
+# Design docs and the plan are hand-formatted (wide tables, mermaid).
+PLAN.md
+docs/**/*.md
+
+# Archived SQL-proof evidence (harness code and its recorded output): kept byte-for-byte.
+docs/reference/
+
+# Local agent/editor tooling config (e.g. the preview launch.json): written by the tool, not by us.
+.claude/

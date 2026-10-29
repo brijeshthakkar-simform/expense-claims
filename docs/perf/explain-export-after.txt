@@ -1,0 +1,224 @@
+# explain-export-after.txt — export batch WITH claims_export_idx (06 §6.6, 07 §12.2)
+# generated: 2026-10-16T12:40:19.298Z by pnpm perf:explain (scripts/perf/explain.ts)
+# git: no commit yet (uncommitted working tree)
+# server: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+# database: expense_perf, loaded by pnpm perf:seed --months 24 --claims 10000 --seed 42 --until 2026-10-15
+# rows: claims 10000 (APPROVED 8700, REJECTED 500, SUBMITTED 400, DRAFT 400), line_items 39937, claim_submissions 9600, approval_steps 12804 (PENDING 400), claim_events 21767, users 500
+# roles: "after" runs as expense_app (the app's role); "before" as expense_owner, the only role that may DROP the index (inside BEGIN … ROLLBACK). Tables with row security: 0, so the role does not change the plan.
+# SQL: captured from the app Prisma client (query event) while exportRepo.approvedClaimsBatch(fin1, args) ran as expense_app; asserted byte-identical to approvedClaimsBatchSql(args).text and .values
+# period: 2026-09-01 … 2026-09-30 IST = approved_at in [2026-08-31T18:30:00.000Z, 2026-09-30T18:30:00.000Z), asOf 2026-10-16T12:40:19.183Z, LIMIT 500 (EXPORT_BATCH_SIZE); 419 approved claims in the period
+# Batch 1: 419 claims; cursor null
+# Batch 2: 209 claims; cursor {"approvedAt":"2026-09-15T09:30:34.727Z","id":"01a144b8-3d26-70a9-b9a1-fd20e8432533"}
+# Batch 3: 236 claims; cursor {"approvedAt":"2026-09-15T05:30:00.000Z","id":"01a144b8-3d23-7803-a0e8-3cb0e78c6529"}
+#
+# expect (P7 exit criterion): the page is "Limit → Index Scan using claims_export_idx on claims c", i.e. no Sort below the Limit, with
+#   Index Cond ROW(approved_at, id) > ROW(…) on a cursor batch; shared hits only. Accepted
+#   too when the rest of the period fits in one batch: "Limit → Sort → Bitmap Heap Scan on claims c" whose bitmap is
+#   claims_export_idx and whose heap scan returns at most LIMIT (500) rows, so the Sort
+#   orders only this batch's rows (still O(batch); the planner's choice when the Limit cuts
+#   nothing, and it depends on the heap's physical order).
+# PASS: Batch 1: page Limit → Sort → Bitmap Heap Scan on claims c (0.228 ms, Buffers: shared hit=15) (bounded Sort of 419 ≤ 500 rows); statement 1.671 ms
+# PASS: Batch 2: page Limit → Index Scan using claims_export_idx on claims c (0.092 ms, Buffers: shared hit=189); statement 0.651 ms
+# PASS: Batch 3: page Limit → Index Scan using claims_export_idx on claims c (0.070 ms, Buffers: shared hit=196); statement 0.694 ms
+# other Sort nodes: none (the final-approver LATERAL is "Limit → Index Scan Backward using approval_steps_submission_id_level_key", then users_pkey)
+
+====================================================================================================
+## Batch 1: the first batch of the period (no cursor) — 419 claims
+-- run as expense_app inside BEGIN … ROLLBACK (no DDL)
+-- nodes: Nested Loop Left Join → Nested Loop → Limit → Sort → Bitmap Heap Scan on claims c → Bitmap Index Scan on claims_export_idx → Index Scan using claim_submissions_pkey on claim_submissions s → Limit → Index Scan Backward using approval_steps_submission_id_level_key on approval_steps st → Index Scan using users_pkey on users u
+-- planning 0.280 ms, execution 1.671 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS WITH page AS (
+      SELECT c.id, c.claim_number, c.current_revision, c.approved_at, c.current_submission_id
+        FROM public.claims c
+       WHERE c.status = 'APPROVED'
+         AND c.approved_at >= $1::timestamptz AND c.approved_at < $2::timestamptz
+         AND c.approved_at < $3::timestamptz
+         
+       ORDER BY c.approved_at, c.id
+       LIMIT $4
+    )
+    SELECT p.id, p.claim_number AS "claimNumber", p.current_revision AS revision,
+           p.approved_at AS "approvedAt", s.submitted_at AS "submittedAt", s.snapshot,
+           fa.email AS "finalApproverEmail"
+      FROM page p
+      JOIN public.claim_submissions s ON s.id = p.current_submission_id AND s.claim_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT (SELECT u.email FROM public.users u WHERE u.id = st.approver_id) AS email
+          FROM public.approval_steps st
+         WHERE st.submission_id = p.current_submission_id AND st.status = 'APPROVED'
+         ORDER BY st.level DESC
+         LIMIT 1
+      ) fa ON true
+     ORDER BY p.approved_at, p.id;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('2026-08-31T18:30:00.000Z', '2026-09-30T18:30:00.000Z', '2026-10-16T12:40:19.183Z', 500);
+
+Nested Loop Left Join  (cost=572.96..2167.31 rows=1 width=1858) (actual time=0.217..1.632 rows=419.00 loops=1)
+  Buffers: shared hit=3786
+  ->  Nested Loop  (cost=572.68..2150.69 rows=1 width=1358) (actual time=0.188..0.686 rows=419.00 loops=1)
+        Buffers: shared hit=1272
+        ->  Limit  (cost=572.39..573.29 rows=360 width=60) (actual time=0.178..0.228 rows=419.00 loops=1)
+              Buffers: shared hit=15
+              ->  Sort  (cost=572.39..573.29 rows=360 width=60) (actual time=0.178..0.204 rows=419.00 loops=1)
+                    Sort Key: c.approved_at, c.id
+                    Sort Method: quicksort  Memory: 80kB
+                    Buffers: shared hit=15
+                    ->  Bitmap Heap Scan on claims c  (cost=33.55..557.11 rows=360 width=60) (actual time=0.019..0.073 rows=419.00 loops=1)
+                          Recheck Cond: ((approved_at >= '2026-08-31 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-09-30 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-10-16 12:40:19.183+00'::timestamp with time zone))
+                          Filter: (status = 'APPROVED'::claim_status)
+                          Heap Blocks: exact=10
+                          Buffers: shared hit=15
+                          ->  Bitmap Index Scan on claims_export_idx  (cost=0.00..33.46 rows=414 width=0) (actual time=0.014..0.014 rows=419.00 loops=1)
+                                Index Cond: ((approved_at >= '2026-08-31 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-09-30 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-10-16 12:40:19.183+00'::timestamp with time zone))
+                                Index Searches: 1
+                                Buffers: shared hit=5
+        ->  Index Scan using claim_submissions_pkey on claim_submissions s  (cost=0.29..4.37 rows=1 width=1330) (actual time=0.001..0.001 rows=1.00 loops=419)
+              Index Cond: (id = c.current_submission_id)
+              Filter: (claim_id = c.id)
+              Index Searches: 419
+              Buffers: shared hit=1257
+  ->  Limit  (cost=0.29..16.59 rows=1 width=518) (actual time=0.002..0.002 rows=1.00 loops=419)
+        Buffers: shared hit=2514
+        ->  Index Scan Backward using approval_steps_submission_id_level_key on approval_steps st  (cost=0.29..16.59 rows=1 width=518) (actual time=0.002..0.002 rows=1.00 loops=419)
+              Index Cond: (submission_id = c.current_submission_id)
+              Filter: (status = 'APPROVED'::approval_step_status)
+              Index Searches: 419
+              Buffers: shared hit=2514
+              SubPlan 1
+                ->  Index Scan using users_pkey on users u  (cost=0.27..8.29 rows=1 width=16) (actual time=0.001..0.001 rows=1.00 loops=419)
+                      Index Cond: (id = st.approver_id)
+                      Index Searches: 419
+                      Buffers: shared hit=1257
+Planning:
+  Buffers: shared hit=15
+Planning Time: 0.280 ms
+Execution Time: 1.671 ms
+
+====================================================================================================
+## Batch 2: mid-period, keyset cursor after row 210 of 419 — 209 claims
+-- run as expense_app inside BEGIN … ROLLBACK (no DDL)
+-- nodes: Nested Loop Left Join → Nested Loop → Limit → Index Scan using claims_export_idx on claims c → Index Scan using claim_submissions_id_claim_id_key on claim_submissions s → Limit → Index Scan Backward using approval_steps_submission_id_level_key on approval_steps st → Index Scan using users_pkey on users u
+-- planning 0.378 ms, execution 0.651 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS WITH page AS (
+      SELECT c.id, c.claim_number, c.current_revision, c.approved_at, c.current_submission_id
+        FROM public.claims c
+       WHERE c.status = 'APPROVED'
+         AND c.approved_at >= $1::timestamptz AND c.approved_at < $2::timestamptz
+         AND c.approved_at < $3::timestamptz
+         AND (c.approved_at, c.id) > ($4::timestamptz, $5::uuid)
+       ORDER BY c.approved_at, c.id
+       LIMIT $6
+    )
+    SELECT p.id, p.claim_number AS "claimNumber", p.current_revision AS revision,
+           p.approved_at AS "approvedAt", s.submitted_at AS "submittedAt", s.snapshot,
+           fa.email AS "finalApproverEmail"
+      FROM page p
+      JOIN public.claim_submissions s ON s.id = p.current_submission_id AND s.claim_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT (SELECT u.email FROM public.users u WHERE u.id = st.approver_id) AS email
+          FROM public.approval_steps st
+         WHERE st.submission_id = p.current_submission_id AND st.status = 'APPROVED'
+         ORDER BY st.level DESC
+         LIMIT 1
+      ) fa ON true
+     ORDER BY p.approved_at, p.id;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('2026-08-31T18:30:00.000Z', '2026-09-30T18:30:00.000Z', '2026-10-16T12:40:19.183Z', '2026-09-15T09:30:34.727Z', '01a144b8-3d26-70a9-b9a1-fd20e8432533', 500);
+
+Nested Loop Left Join  (cost=0.86..167.48 rows=1 width=1858) (actual time=0.013..0.631 rows=209.00 loops=1)
+  Buffers: shared hit=2070
+  ->  Nested Loop  (cost=0.57..150.87 rows=1 width=1358) (actual time=0.008..0.275 rows=209.00 loops=1)
+        Buffers: shared hit=816
+        ->  Limit  (cost=0.29..46.90 rows=13 width=60) (actual time=0.005..0.092 rows=209.00 loops=1)
+              Buffers: shared hit=189
+              ->  Index Scan using claims_export_idx on claims c  (cost=0.29..46.90 rows=13 width=60) (actual time=0.005..0.081 rows=209.00 loops=1)
+                    Index Cond: ((approved_at >= '2026-08-31 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-09-30 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-10-16 12:40:19.183+00'::timestamp with time zone) AND (ROW(approved_at, id) > ROW('2026-09-15 09:30:34.727+00'::timestamp with time zone, '01a144b8-3d26-70a9-b9a1-fd20e8432533'::uuid)))
+                    Filter: (status = 'APPROVED'::claim_status)
+                    Index Searches: 1
+                    Buffers: shared hit=189
+        ->  Index Scan using claim_submissions_id_claim_id_key on claim_submissions s  (cost=0.29..8.00 rows=1 width=1330) (actual time=0.001..0.001 rows=1.00 loops=209)
+              Index Cond: ((id = c.current_submission_id) AND (claim_id = c.id))
+              Index Searches: 209
+              Buffers: shared hit=627
+  ->  Limit  (cost=0.29..16.59 rows=1 width=518) (actual time=0.002..0.002 rows=1.00 loops=209)
+        Buffers: shared hit=1254
+        ->  Index Scan Backward using approval_steps_submission_id_level_key on approval_steps st  (cost=0.29..16.59 rows=1 width=518) (actual time=0.001..0.001 rows=1.00 loops=209)
+              Index Cond: (submission_id = c.current_submission_id)
+              Filter: (status = 'APPROVED'::approval_step_status)
+              Index Searches: 209
+              Buffers: shared hit=1254
+              SubPlan 1
+                ->  Index Scan using users_pkey on users u  (cost=0.27..8.29 rows=1 width=16) (actual time=0.000..0.001 rows=1.00 loops=209)
+                      Index Cond: (id = st.approver_id)
+                      Index Searches: 209
+                      Buffers: shared hit=627
+Planning:
+  Buffers: shared hit=15
+Planning Time: 0.378 ms
+Execution Time: 0.651 ms
+
+====================================================================================================
+## Batch 3: keyset cursor inside the 50 claims sharing approved_at 2026-09-15T05:30:00.000Z (after the 25th) — 236 claims
+-- run as expense_app inside BEGIN … ROLLBACK (no DDL)
+-- nodes: Nested Loop Left Join → Nested Loop → Limit → Index Scan using claims_export_idx on claims c → Index Scan using claim_submissions_id_claim_id_key on claim_submissions s → Limit → Index Scan Backward using approval_steps_submission_id_level_key on approval_steps st → Index Scan using users_pkey on users u
+-- planning 0.178 ms, execution 0.694 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS WITH page AS (
+      SELECT c.id, c.claim_number, c.current_revision, c.approved_at, c.current_submission_id
+        FROM public.claims c
+       WHERE c.status = 'APPROVED'
+         AND c.approved_at >= $1::timestamptz AND c.approved_at < $2::timestamptz
+         AND c.approved_at < $3::timestamptz
+         AND (c.approved_at, c.id) > ($4::timestamptz, $5::uuid)
+       ORDER BY c.approved_at, c.id
+       LIMIT $6
+    )
+    SELECT p.id, p.claim_number AS "claimNumber", p.current_revision AS revision,
+           p.approved_at AS "approvedAt", s.submitted_at AS "submittedAt", s.snapshot,
+           fa.email AS "finalApproverEmail"
+      FROM page p
+      JOIN public.claim_submissions s ON s.id = p.current_submission_id AND s.claim_id = p.id
+      LEFT JOIN LATERAL (
+        SELECT (SELECT u.email FROM public.users u WHERE u.id = st.approver_id) AS email
+          FROM public.approval_steps st
+         WHERE st.submission_id = p.current_submission_id AND st.status = 'APPROVED'
+         ORDER BY st.level DESC
+         LIMIT 1
+      ) fa ON true
+     ORDER BY p.approved_at, p.id;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('2026-08-31T18:30:00.000Z', '2026-09-30T18:30:00.000Z', '2026-10-16T12:40:19.183Z', '2026-09-15T05:30:00.000Z', '01a144b8-3d23-7803-a0e8-3cb0e78c6529', 500);
+
+Nested Loop Left Join  (cost=0.86..167.48 rows=1 width=1858) (actual time=0.012..0.674 rows=236.00 loops=1)
+  Buffers: shared hit=2320
+  ->  Nested Loop  (cost=0.57..150.87 rows=1 width=1358) (actual time=0.008..0.287 rows=236.00 loops=1)
+        Buffers: shared hit=904
+        ->  Limit  (cost=0.29..46.90 rows=13 width=60) (actual time=0.005..0.070 rows=236.00 loops=1)
+              Buffers: shared hit=196
+              ->  Index Scan using claims_export_idx on claims c  (cost=0.29..46.90 rows=13 width=60) (actual time=0.005..0.059 rows=236.00 loops=1)
+                    Index Cond: ((approved_at >= '2026-08-31 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-09-30 18:30:00+00'::timestamp with time zone) AND (approved_at < '2026-10-16 12:40:19.183+00'::timestamp with time zone) AND (ROW(approved_at, id) > ROW('2026-09-15 05:30:00+00'::timestamp with time zone, '01a144b8-3d23-7803-a0e8-3cb0e78c6529'::uuid)))
+                    Filter: (status = 'APPROVED'::claim_status)
+                    Index Searches: 1
+                    Buffers: shared hit=196
+        ->  Index Scan using claim_submissions_id_claim_id_key on claim_submissions s  (cost=0.29..8.00 rows=1 width=1330) (actual time=0.001..0.001 rows=1.00 loops=236)
+              Index Cond: ((id = c.current_submission_id) AND (claim_id = c.id))
+              Index Searches: 236
+              Buffers: shared hit=708
+  ->  Limit  (cost=0.29..16.59 rows=1 width=518) (actual time=0.001..0.001 rows=1.00 loops=236)
+        Buffers: shared hit=1416
+        ->  Index Scan Backward using approval_steps_submission_id_level_key on approval_steps st  (cost=0.29..16.59 rows=1 width=518) (actual time=0.001..0.001 rows=1.00 loops=236)
+              Index Cond: (submission_id = c.current_submission_id)
+              Filter: (status = 'APPROVED'::approval_step_status)
+              Index Searches: 236
+              Buffers: shared hit=1416
+              SubPlan 1
+                ->  Index Scan using users_pkey on users u  (cost=0.27..8.29 rows=1 width=16) (actual time=0.001..0.001 rows=1.00 loops=236)
+                      Index Cond: (id = st.approver_id)
+                      Index Searches: 236
+                      Buffers: shared hit=708
+Planning:
+  Buffers: shared hit=15
+Planning Time: 0.178 ms
+Execution Time: 0.694 ms

@@ -1,0 +1,234 @@
+[
+  {
+    "label": "nested create returns DB total",
+    "totalMinorReturned": 4200,
+    "claimNumber": "EXP-2026-000109"
+  },
+  {
+    "label": "total after re-read",
+    "totalMinor": 4200
+  },
+  {
+    "label": "model op: claim.update({ totalMinor })",
+    "expected": "UC003",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "Claim",
+    "driverAdapterError_cause": {
+      "code": "UC003",
+      "kind": "postgres",
+      "originalCode": "UC003",
+      "originalMessage": "TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written"
+    },
+    "message": "Database error. Code: `UC003`. Message: `TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written`",
+    "readSqlState": "UC003"
+  },
+  {
+    "label": "model op: claim.updateMany({ totalMinor })",
+    "expected": "UC003",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "Claim",
+    "driverAdapterError_cause": {
+      "code": "UC003",
+      "kind": "postgres",
+      "originalCode": "UC003",
+      "originalMessage": "TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written"
+    },
+    "message": "Database error. Code: `UC003`. Message: `TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written`",
+    "readSqlState": "UC003"
+  },
+  {
+    "label": "$executeRaw UPDATE total",
+    "expected": "UC003",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2010",
+    "metaKeys": [
+      "driverAdapterError"
+    ],
+    "driverAdapterError_cause": {
+      "code": "UC003",
+      "kind": "postgres",
+      "originalCode": "UC003",
+      "originalMessage": "TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written"
+    },
+    "message": "Raw query failed. Code: `UC003`. Message: `TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written`",
+    "readSqlState": "UC003"
+  },
+  {
+    "label": "$queryRaw (RETURNING) UPDATE total",
+    "expected": "UC003",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2010",
+    "metaKeys": [
+      "driverAdapterError"
+    ],
+    "driverAdapterError_cause": {
+      "code": "UC003",
+      "kind": "postgres",
+      "originalCode": "UC003",
+      "originalMessage": "TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written"
+    },
+    "message": "Raw query failed. Code: `UC003`. Message: `TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written`",
+    "readSqlState": "UC003"
+  },
+  {
+    "label": "model op inside interactive tx",
+    "expected": "UC003",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "Claim",
+    "driverAdapterError_cause": {
+      "code": "UC003",
+      "kind": "postgres",
+      "originalCode": "UC003",
+      "originalMessage": "TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written"
+    },
+    "message": "Database error. Code: `UC003`. Message: `TOTAL_IS_DERIVED: total_minor is computed from line items and cannot be written`",
+    "readSqlState": "UC003"
+  },
+  {
+    "label": "lineItem.create with amount 0 (CHECK)",
+    "expected": "23514",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "LineItem",
+    "driverAdapterError_cause": {
+      "code": "23514",
+      "kind": "postgres",
+      "originalCode": "23514",
+      "originalMessage": "new row for relation \"line_items\" violates check constraint \"line_items_amount_range\""
+    },
+    "message": "Database error. Code: `23514`. Message: `new row for relation \"line_items\" violates check constraint \"line_items_amount_range\"`",
+    "readSqlState": "23514"
+  },
+  {
+    "label": "session.create duplicate token_hash (unique)",
+    "expected": "23505",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2002",
+    "metaKeys": [
+      "driverAdapterError",
+      "modelName"
+    ],
+    "metaModelName": "Session",
+    "driverAdapterError_cause": {
+      "kind": "UniqueConstraintViolation",
+      "originalCode": "23505",
+      "originalMessage": "duplicate key value violates unique constraint \"sessions_token_hash_key\"",
+      "constraint": {
+        "index": "sessions_token_hash_key"
+      }
+    },
+    "message": "Unique constraint failed on the constraint: `sessions_token_hash_key`",
+    "readSqlState": "23505"
+  },
+  {
+    "label": "future expense date (UC014) via createMany",
+    "expected": "UC014",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "LineItem",
+    "driverAdapterError_cause": {
+      "code": "UC014",
+      "kind": "postgres",
+      "originalCode": "UC014",
+      "originalMessage": "EXPENSE_DATE_IN_FUTURE: 2099-01-01 is after today in Asia/Kolkata"
+    },
+    "message": "Database error. Code: `UC014`. Message: `EXPENSE_DATE_IN_FUTURE: 2099-01-01 is after today in Asia/Kolkata`",
+    "readSqlState": "UC014"
+  },
+  {
+    "label": "lineItem.update on SUBMITTED claim (spike b)",
+    "expected": "UC002",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "LineItem",
+    "driverAdapterError_cause": {
+      "code": "UC002",
+      "kind": "postgres",
+      "originalCode": "UC002",
+      "originalMessage": "CLAIM_NOT_EDITABLE: claim EXP-2026-000107 is in approval; recall it to edit"
+    },
+    "message": "Database error. Code: `UC002`. Message: `CLAIM_NOT_EDITABLE: claim EXP-2026-000107 is in approval; recall it to edit`",
+    "readSqlState": "UC002"
+  },
+  {
+    "label": "lineItem.deleteMany on APPROVED claim",
+    "expected": "UC001",
+    "ok": true,
+    "ctor": "PrismaClientKnownRequestError",
+    "name": "PrismaClientKnownRequestError",
+    "code": "P2039",
+    "metaKeys": [
+      "modelName",
+      "driverAdapterError"
+    ],
+    "metaModelName": "LineItem",
+    "driverAdapterError_cause": {
+      "code": "UC001",
+      "kind": "postgres",
+      "originalCode": "UC001",
+      "originalMessage": "CLAIM_LOCKED: claim EXP-2026-000108 is approved and read-only"
+    },
+    "message": "Database error. Code: `UC001`. Message: `CLAIM_LOCKED: claim EXP-2026-000108 is approved and read-only`",
+    "readSqlState": "UC001"
+  },
+  {
+    "label": "COMMIT-time deferred UC015 (interactive tx)",
+    "expected": "UC015",
+    "ok": true,
+    "ctor": "DriverAdapterError",
+    "name": "DriverAdapterError",
+    "cause": {
+      "code": "UC015",
+      "kind": "postgres",
+      "originalCode": "UC015",
+      "originalMessage": "AUDIT_EVENT_MISSING: claim EXP-2026-000107 moved SUBMITTED -> DRAFT without a matching CLA"
+    },
+    "message": "AUDIT_EVENT_MISSING: claim EXP-2026-000107 moved SUBMITTED -> DRAFT without a matching CLAIM_RECALLED event by the right actor in this trans",
+    "readSqlState": "UC015"
+  }
+]

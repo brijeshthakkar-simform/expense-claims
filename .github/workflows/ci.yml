@@ -1,0 +1,100 @@
+# CI (01 §13, 07 §13, PLAN P8): frozen install → prisma generate → typecheck → lint → format check →
+# unit → component → integration (Testcontainers) → drift, i.e. the same commands as `pnpm verify`,
+# cheapest first, then the drift rule (D-37) on the compose Postgres (same 01-roles.sh as local):
+# `pnpm db:deploy && pnpm db:diff-check`, which compares the migrated DB with schema.prisma, so no
+# shadow database is created or needed. Plus an image build with no .env.
+# OPTIONAL hardening (BUF): pin every action by commit SHA.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  verify:
+    name: verify (quality, integration, drift)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6 # version from package.json "packageManager"
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # ── quality ──────────────────────────────────────────────────────────────
+      - run: pnpm db:generate
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm test:unit --reporter=default --reporter=junit --outputFile.junit=test-results/junit-unit.xml
+      - run: pnpm test:component --reporter=default --reporter=junit --outputFile.junit=test-results/junit-component.xml
+
+      # ── integration: Testcontainers starts postgres:18.6-trixie on the runner's Docker ──
+      - run: pnpm test:int --reporter=default --reporter=junit --outputFile.junit=test-results/junit-int.xml
+
+      # ── drift (D-37, 03 §11.4): one rule everywhere, no shadow DB ────────────
+      # If Docker Hub's anonymous pull limit bites, add a read-only docker/login-action step here.
+      - name: Start the compose Postgres (initdb runs 01-roles.sh)
+        run: |
+          cp .env.example .env
+          docker compose up -d --wait postgres
+      - name: Drift = pnpm db:deploy && pnpm db:diff-check (as expense_owner)
+        run: pnpm db:deploy && pnpm db:diff-check
+
+      - name: Compose logs
+        if: failure()
+        run: docker compose logs --no-color || true
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: test-results/
+          if-no-files-found: ignore
+      - name: Stop the compose stack
+        if: always()
+        run: docker compose down -v || true
+
+  image:
+    name: image (runner + tools, built with no .env)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7 # .env is gitignored and .dockerignore drops .env* anyway
+      - uses: docker/setup-buildx-action@v4
+      - name: Build runner image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: runner
+          tags: expense-claims-app:ci
+          load: true
+          cache-from: type=gha,scope=runner
+          cache-to: type=gha,mode=max,scope=runner
+      - name: Build tools image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: tools
+          tags: expense-claims-tools:ci
+          load: true
+          cache-from: type=gha,scope=tools
+          cache-to: type=gha,mode=max,scope=tools
+      - name: Runner runs as uid 1000 and ships no .env
+        run: |
+          test "$(docker run --rm --entrypoint id expense-claims-app:ci -u)" = "1000"
+          docker run --rm --entrypoint sh expense-claims-app:ci -c '! ls -a /app | grep -q "^\.env"'

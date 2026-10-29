@@ -1,0 +1,21 @@
+# .env* never enters the build context: the image is identical in every environment and holds no secrets.
+.git
+.github
+node_modules
+.next
+.env
+.env.*
+coverage
+.vitest
+playwright-report
+test-results
+tests
+e2e
+load
+docs
+src/generated
+*.log
+# local-only state: FS receipt fallback data, editor/OS noise, TS incremental cache
+.data
+.DS_Store
+*.tsbuildinfo

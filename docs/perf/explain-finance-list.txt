@@ -1,0 +1,124 @@
+# explain-finance-list.txt — finance list page, default statuses, before + after (06 §7, 07 §12.2)
+# generated: 2026-10-16T12:40:19.333Z by pnpm perf:explain (scripts/perf/explain.ts)
+# git: no commit yet (uncommitted working tree)
+# server: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+# database: expense_perf, loaded by pnpm perf:seed --months 24 --claims 10000 --seed 42 --until 2026-10-15
+# rows: claims 10000 (APPROVED 8700, REJECTED 500, SUBMITTED 400, DRAFT 400), line_items 39937, claim_submissions 9600, approval_steps 12804 (PENDING 400), claim_events 21767, users 500
+# roles: "after" runs as expense_app (the app's role); "before" as expense_owner, the only role that may DROP the index (inside BEGIN … ROLLBACK). Tables with row security: 0, so the role does not change the plan.
+# SQL: captured from the app Prisma client (query event) while finance.service listFinanceClaims(ctx, FinanceClaimsQuery.parse({from, to})) ran as expense_app; asserted byte-identical to financeListSql(actor, args).text
+# actor: fin1@perf.test (FINANCE)
+# query: status=SUBMITTED,APPROVED,REJECTED (default), dateField=submittedAt, from=2026-09-17 to=2026-10-16 (last 30 IST days), limit 25 → LIMIT 26
+#
+# expect after: Index Scan using claims_submitted_idx, status as a Filter, no Sort
+# PASS: after 0.099 ms, shared hit=142; Index Cond: ((submitted_at IS NOT NULL) AND (submitted_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (submitted_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+# before: 0.457 ms, shared hit=118; nodes: Limit → Result → Sort → Hash Join → Bitmap Heap Scan on claims c → Bitmap Index Scan on claims_finance_list_idx → Hash → Seq Scan on users u → Aggregate → Index Only Scan using line_items_claim_idx on line_items li
+
+====================================================================================================
+## finance list page, claims_submitted_idx dropped — 25 rows
+-- run as expense_owner inside BEGIN; DROP INDEX public.claims_submitted_idx; … ROLLBACK
+-- nodes: Limit → Result → Sort → Hash Join → Bitmap Heap Scan on claims c → Bitmap Index Scan on claims_finance_list_idx → Hash → Seq Scan on users u → Aggregate → Index Only Scan using line_items_claim_idx on line_items li
+-- planning 0.142 ms, execution 0.457 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS SELECT c.id, c.claim_number AS "claimNumber", c.title, c.status::text AS status, c.currency,
+           c.total_minor AS "totalMinor", c.current_revision AS "currentRevision",
+           (SELECT count(*)::int FROM public.line_items li WHERE li.claim_id = c.id)
+             AS "lineItemCount",
+           c.created_at AS "createdAt", c.submitted_at AS "submittedAt",
+           c.approved_at AS "approvedAt",
+           u.id AS "claimantId", u.name AS "claimantName", u.email AS "claimantEmail"
+      FROM public.claims c
+      JOIN public.users u ON u.id = c.claimant_id
+     WHERE TRUE AND c.status IN ($1::public.claim_status,$2::public.claim_status,$3::public.claim_status) AND c.submitted_at IS NOT NULL AND c.submitted_at >= $4::timestamptz AND c.submitted_at < $5::timestamptz
+     ORDER BY c.submitted_at DESC, c.id DESC
+     LIMIT $6;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('SUBMITTED', 'APPROVED', 'REJECTED', '2026-09-16T18:30:00.000Z', '2026-10-16T18:30:00.000Z', 26);
+
+Limit  (cost=663.76..778.16 rows=26 width=171) (actual time=0.400..0.439 rows=26.00 loops=1)
+  Buffers: shared hit=118
+  ->  Result  (cost=663.76..2978.16 rows=526 width=171) (actual time=0.400..0.437 rows=26.00 loops=1)
+        Buffers: shared hit=118
+        ->  Sort  (cost=663.76..665.07 rows=526 width=167) (actual time=0.394..0.395 rows=26.00 loops=1)
+              Sort Key: c.submitted_at DESC, c.id DESC
+              Sort Method: top-N heapsort  Memory: 37kB
+              Buffers: shared hit=65
+              ->  Hash Join  (cost=95.49..648.76 rows=526 width=167) (actual time=0.138..0.293 rows=575.00 loops=1)
+                    Hash Cond: (c.claimant_id = u.id)
+                    Buffers: shared hit=65
+                    ->  Bitmap Heap Scan on claims c  (cost=69.24..618.49 rows=526 width=110) (actual time=0.037..0.083 rows=575.00 loops=1)
+                          Recheck Cond: ((status = ANY ('{SUBMITTED,APPROVED,REJECTED}'::claim_status[])) AND (submitted_at IS NOT NULL) AND (submitted_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (submitted_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+                          Heap Blocks: exact=33
+                          Buffers: shared hit=50
+                          ->  Bitmap Index Scan on claims_finance_list_idx  (cost=0.00..69.11 rows=526 width=0) (actual time=0.032..0.032 rows=575.00 loops=1)
+                                Index Cond: ((status = ANY ('{SUBMITTED,APPROVED,REJECTED}'::claim_status[])) AND (submitted_at IS NOT NULL) AND (submitted_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (submitted_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+                                Index Searches: 3
+                                Buffers: shared hit=17
+                    ->  Hash  (cost=20.00..20.00 rows=500 width=45) (actual time=0.093..0.093 rows=500.00 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 46kB
+                          Buffers: shared hit=15
+                          ->  Seq Scan on users u  (cost=0.00..20.00 rows=500 width=45) (actual time=0.004..0.041 rows=500.00 loops=1)
+                                Buffers: shared hit=15
+        SubPlan 1
+          ->  Aggregate  (cost=4.37..4.38 rows=1 width=4) (actual time=0.001..0.001 rows=1.00 loops=26)
+                Buffers: shared hit=53
+                ->  Index Only Scan using line_items_claim_idx on line_items li  (cost=0.29..4.36 rows=4 width=0) (actual time=0.001..0.001 rows=4.38 loops=26)
+                      Index Cond: (claim_id = c.id)
+                      Heap Fetches: 0
+                      Index Searches: 26
+                      Buffers: shared hit=53
+Planning:
+  Buffers: shared hit=9
+Planning Time: 0.142 ms
+Execution Time: 0.457 ms
+
+====================================================================================================
+## finance list page — 25 rows
+-- run as expense_app inside BEGIN … ROLLBACK (no DDL)
+-- nodes: Limit → Nested Loop → Index Scan using claims_submitted_idx on claims c → Memoize → Index Scan using users_pkey on users u → Aggregate → Index Only Scan using line_items_claim_idx on line_items li
+-- planning 0.146 ms, execution 0.099 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS SELECT c.id, c.claim_number AS "claimNumber", c.title, c.status::text AS status, c.currency,
+           c.total_minor AS "totalMinor", c.current_revision AS "currentRevision",
+           (SELECT count(*)::int FROM public.line_items li WHERE li.claim_id = c.id)
+             AS "lineItemCount",
+           c.created_at AS "createdAt", c.submitted_at AS "submittedAt",
+           c.approved_at AS "approvedAt",
+           u.id AS "claimantId", u.name AS "claimantName", u.email AS "claimantEmail"
+      FROM public.claims c
+      JOIN public.users u ON u.id = c.claimant_id
+     WHERE TRUE AND c.status IN ($1::public.claim_status,$2::public.claim_status,$3::public.claim_status) AND c.submitted_at IS NOT NULL AND c.submitted_at >= $4::timestamptz AND c.submitted_at < $5::timestamptz
+     ORDER BY c.submitted_at DESC, c.id DESC
+     LIMIT $6;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('SUBMITTED', 'APPROVED', 'REJECTED', '2026-09-16T18:30:00.000Z', '2026-10-16T18:30:00.000Z', 26);
+
+Limit  (cost=0.57..172.59 rows=26 width=171) (actual time=0.016..0.084 rows=26.00 loops=1)
+  Buffers: shared hit=142
+  ->  Nested Loop  (cost=0.57..3487.27 rows=527 width=171) (actual time=0.015..0.082 rows=26.00 loops=1)
+        Buffers: shared hit=142
+        ->  Index Scan using claims_submitted_idx on claims c  (cost=0.29..1021.58 rows=527 width=110) (actual time=0.006..0.011 rows=26.00 loops=1)
+              Index Cond: ((submitted_at IS NOT NULL) AND (submitted_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (submitted_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+              Filter: (status = ANY ('{SUBMITTED,APPROVED,REJECTED}'::claim_status[]))
+              Index Searches: 1
+              Buffers: shared hit=17
+        ->  Memoize  (cost=0.28..0.44 rows=1 width=45) (actual time=0.001..0.001 rows=1.00 loops=26)
+              Cache Key: c.claimant_id
+              Cache Mode: logical
+              Hits: 2  Misses: 24  Evictions: 0  Overflows: 0  Memory Usage: 4kB
+              Buffers: shared hit=72
+              ->  Index Scan using users_pkey on users u  (cost=0.27..0.43 rows=1 width=45) (actual time=0.001..0.001 rows=1.00 loops=24)
+                    Index Cond: (id = c.claimant_id)
+                    Index Searches: 24
+                    Buffers: shared hit=72
+        SubPlan 1
+          ->  Aggregate  (cost=4.37..4.38 rows=1 width=4) (actual time=0.001..0.001 rows=1.00 loops=26)
+                Buffers: shared hit=53
+                ->  Index Only Scan using line_items_claim_idx on line_items li  (cost=0.29..4.36 rows=4 width=0) (actual time=0.001..0.001 rows=4.38 loops=26)
+                      Index Cond: (claim_id = c.id)
+                      Heap Fetches: 0
+                      Index Searches: 26
+                      Buffers: shared hit=53
+Planning:
+  Buffers: shared hit=12
+Planning Time: 0.146 ms
+Execution Time: 0.099 ms

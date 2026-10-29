@@ -1,0 +1,12 @@
+# Settings only; this is a single-package repo.
+onlyBuiltDependencies: # the only packages allowed to run install scripts
+  - '@prisma/engines' # downloads the schema-engine that `prisma migrate` needs
+  - prisma
+  - esbuild # tsx / vite
+  - unrs-resolver # eslint import resolver
+ignoredBuiltDependencies:
+  - sharp # Next image optimisation is not used
+  - cpu-features # optional native speed-up for ssh2 (testcontainers); not needed
+  - ssh2 # same
+  - protobufjs # postinstall is only a version check
+# OPTIONAL (buffer day): minimumReleaseAge: 4320 with minimumReleaseAgeExclude: [next, '@next/*', eslint-config-next]

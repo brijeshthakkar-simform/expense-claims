@@ -1,0 +1,8 @@
+node_modules/
+probe-client/generated/
+out/run.log
+out/results.json
+out/migrations-p0/
+out/stages/
+out/schema.prisma
+out/migrations.json

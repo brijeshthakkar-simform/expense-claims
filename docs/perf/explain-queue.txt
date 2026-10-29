@@ -1,0 +1,155 @@
+# explain-queue.txt — approver queue, PENDING page, before + after (06 §7, 07 §12.2)
+# generated: 2026-10-16T12:40:19.318Z by pnpm perf:explain (scripts/perf/explain.ts)
+# git: no commit yet (uncommitted working tree)
+# server: PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+# database: expense_perf, loaded by pnpm perf:seed --months 24 --claims 10000 --seed 42 --until 2026-10-15
+# rows: claims 10000 (APPROVED 8700, REJECTED 500, SUBMITTED 400, DRAFT 400), line_items 39937, claim_submissions 9600, approval_steps 12804 (PENDING 400), claim_events 21767, users 500
+# roles: "after" runs as expense_app (the app's role); "before" as expense_owner, the only role that may DROP the index (inside BEGIN … ROLLBACK). Tables with row security: 0, so the role does not change the plan.
+# SQL: captured from the app Prisma client (query event) while approvals.service listQueue(ctx, ApprovalQueueQuery.parse({from, to})) ran as expense_app (steps.repo listQueue has no exported builder; nothing was copied)
+# approver: mgr042@perf.test, the busiest (most PENDING steps: 15; 10 activated in the window)
+# query: status=PENDING (default), from=2026-09-17 to=2026-10-16 (the last 30 IST days, on activated_at), limit 25 → LIMIT 26
+#
+# expect after: Index Scan using approval_steps_pending_queue_idx, Index Cond (approver_id = … AND activated_at >= … AND activated_at < …), no Sort
+# PASS: after 0.094 ms, shared hit=121; Index Cond: ((approver_id = '01a144b8-1506-792a-8df4-c3988ed4bce2'::uuid) AND (activated_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (activated_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+# before: 0.169 ms, shared hit=171; nodes: Limit → Result → Sort → Nested Loop → Nested Loop → Nested Loop → Bitmap Heap Scan on approval_steps s → BitmapAnd → Bitmap Index Scan on approval_steps_approver_history_idx → Bitmap Index Scan on approval_steps_one_pending_per_submission → Index Scan using claim_submissions_id_claim_id_key on claim_submissions sub → Index Scan using claims_pkey on claims c → Index Scan using users_pkey on users u → Aggregate → Index Only Scan using approval_steps_submission_id_approver_id_key on approval_steps x
+
+====================================================================================================
+## PENDING queue page, its index dropped — 10 rows
+-- run as expense_owner inside BEGIN; DROP INDEX public.approval_steps_pending_queue_idx; … ROLLBACK
+-- nodes: Limit → Result → Sort → Nested Loop → Nested Loop → Nested Loop → Bitmap Heap Scan on approval_steps s → BitmapAnd → Bitmap Index Scan on approval_steps_approver_history_idx → Bitmap Index Scan on approval_steps_one_pending_per_submission → Index Scan using claim_submissions_id_claim_id_key on claim_submissions sub → Index Scan using claims_pkey on claims c → Index Scan using users_pkey on users u → Aggregate → Index Only Scan using approval_steps_submission_id_approver_id_key on approval_steps x
+-- planning 0.392 ms, execution 0.169 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS SELECT 
+  s.id AS "stepId", s.level::int AS level,
+  (SELECT count(*)::int FROM public.approval_steps x WHERE x.submission_id = s.submission_id)
+    AS "levelCount",
+  s.tier_label AS "tierLabel", s.status::text AS status,
+  s.activated_at AS "activatedAt", s.decided_at AS "decidedAt",
+  c.id AS "claimId", c.claim_number AS "claimNumber", c.title,
+  u.id AS "claimantId", u.name AS "claimantName",
+  sub.revision, sub.total_minor AS "amountMinor", sub.currency 
+  FROM public.approval_steps s
+  JOIN public.claim_submissions sub ON sub.id = s.submission_id
+  JOIN public.claims c              ON c.id = s.claim_id
+  JOIN public.users u               ON u.id = c.claimant_id
+     WHERE s.approver_id = $1::uuid AND s.status = 'PENDING' AND s.activated_at >= $2::timestamptz AND s.activated_at < $3::timestamptz
+     ORDER BY s.activated_at ASC, s.id ASC
+     LIMIT $4;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('01a144b8-1506-792a-8df4-c3988ed4bce2', '2026-09-16T18:30:00.000Z', '2026-10-16T18:30:00.000Z', 26);
+
+Limit  (cost=279.67..284.01 rows=1 width=181) (actual time=0.111..0.124 rows=10.00 loops=1)
+  Buffers: shared hit=171
+  ->  Result  (cost=279.67..284.01 rows=1 width=181) (actual time=0.111..0.123 rows=10.00 loops=1)
+        Buffers: shared hit=171
+        ->  Sort  (cost=279.67..279.67 rows=1 width=193) (actual time=0.104..0.106 rows=10.00 loops=1)
+              Sort Key: s.activated_at, s.id
+              Sort Method: quicksort  Memory: 27kB
+              Buffers: shared hit=150
+              ->  Nested Loop  (cost=245.04..279.66 rows=1 width=193) (actual time=0.068..0.099 rows=10.00 loops=1)
+                    Buffers: shared hit=150
+                    ->  Nested Loop  (cost=244.76..279.35 rows=1 width=150) (actual time=0.064..0.086 rows=10.00 loops=1)
+                          Buffers: shared hit=120
+                          ->  Nested Loop  (cost=244.48..271.05 rows=1 width=96) (actual time=0.061..0.075 rows=10.00 loops=1)
+                                Buffers: shared hit=90
+                                ->  Bitmap Heap Scan on approval_steps s  (cost=244.19..262.74 rows=1 width=84) (actual time=0.057..0.061 rows=10.00 loops=1)
+                                      Recheck Cond: ((approver_id = '01a144b8-1506-792a-8df4-c3988ed4bce2'::uuid) AND (status = 'PENDING'::approval_step_status))
+                                      Filter: ((activated_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (activated_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+                                      Rows Removed by Filter: 5
+                                      Heap Blocks: exact=13
+                                      Buffers: shared hit=60
+                                      ->  BitmapAnd  (cost=244.19..244.19 rows=5 width=0) (actual time=0.049..0.049 rows=0.00 loops=1)
+                                            Buffers: shared hit=47
+                                            ->  Bitmap Index Scan on approval_steps_approver_history_idx  (cost=0.00..13.67 rows=168 width=0) (actual time=0.020..0.020 rows=168.00 loops=1)
+                                                  Index Cond: (approver_id = '01a144b8-1506-792a-8df4-c3988ed4bce2'::uuid)
+                                                  Index Searches: 1
+                                                  Buffers: shared hit=5
+                                            ->  Bitmap Index Scan on approval_steps_one_pending_per_submission  (cost=0.00..230.27 rows=400 width=0) (actual time=0.025..0.025 rows=400.00 loops=1)
+                                                  Index Searches: 1
+                                                  Buffers: shared hit=42
+                                ->  Index Scan using claim_submissions_id_claim_id_key on claim_submissions sub  (cost=0.29..8.30 rows=1 width=28) (actual time=0.001..0.001 rows=1.00 loops=10)
+                                      Index Cond: (id = s.submission_id)
+                                      Index Searches: 10
+                                      Buffers: shared hit=30
+                          ->  Index Scan using claims_pkey on claims c  (cost=0.29..8.30 rows=1 width=70) (actual time=0.001..0.001 rows=1.00 loops=10)
+                                Index Cond: (id = s.claim_id)
+                                Index Searches: 10
+                                Buffers: shared hit=30
+                    ->  Index Scan using users_pkey on users u  (cost=0.27..0.30 rows=1 width=29) (actual time=0.001..0.001 rows=1.00 loops=10)
+                          Index Cond: (id = c.claimant_id)
+                          Index Searches: 10
+                          Buffers: shared hit=30
+        SubPlan 1
+          ->  Aggregate  (cost=4.31..4.32 rows=1 width=4) (actual time=0.001..0.001 rows=1.00 loops=10)
+                Buffers: shared hit=21
+                ->  Index Only Scan using approval_steps_submission_id_approver_id_key on approval_steps x  (cost=0.29..4.30 rows=1 width=0) (actual time=0.001..0.001 rows=1.20 loops=10)
+                      Index Cond: (submission_id = s.submission_id)
+                      Heap Fetches: 0
+                      Index Searches: 10
+                      Buffers: shared hit=21
+Planning:
+  Buffers: shared hit=33
+Planning Time: 0.392 ms
+Execution Time: 0.169 ms
+
+====================================================================================================
+## PENDING queue page — 10 rows
+-- run as expense_app inside BEGIN … ROLLBACK (no DDL)
+-- nodes: Limit → Nested Loop → Nested Loop → Nested Loop → Index Scan using approval_steps_pending_queue_idx on approval_steps s → Index Scan using claim_submissions_id_claim_id_key on claim_submissions sub → Index Scan using claims_pkey on claims c → Index Scan using users_pkey on users u → Aggregate → Index Only Scan using approval_steps_submission_id_approver_id_key on approval_steps x
+-- planning 0.341 ms, execution 0.094 ms (the second of two runs; the first warmed the cache)
+
+PREPARE perf_q AS SELECT 
+  s.id AS "stepId", s.level::int AS level,
+  (SELECT count(*)::int FROM public.approval_steps x WHERE x.submission_id = s.submission_id)
+    AS "levelCount",
+  s.tier_label AS "tierLabel", s.status::text AS status,
+  s.activated_at AS "activatedAt", s.decided_at AS "decidedAt",
+  c.id AS "claimId", c.claim_number AS "claimNumber", c.title,
+  u.id AS "claimantId", u.name AS "claimantName",
+  sub.revision, sub.total_minor AS "amountMinor", sub.currency 
+  FROM public.approval_steps s
+  JOIN public.claim_submissions sub ON sub.id = s.submission_id
+  JOIN public.claims c              ON c.id = s.claim_id
+  JOIN public.users u               ON u.id = c.claimant_id
+     WHERE s.approver_id = $1::uuid AND s.status = 'PENDING' AND s.activated_at >= $2::timestamptz AND s.activated_at < $3::timestamptz
+     ORDER BY s.activated_at ASC, s.id ASC
+     LIMIT $4;
+
+EXPLAIN (ANALYZE, BUFFERS, SETTINGS) EXECUTE perf_q('01a144b8-1506-792a-8df4-c3988ed4bce2', '2026-09-16T18:30:00.000Z', '2026-10-16T18:30:00.000Z', 26);
+
+Limit  (cost=1.12..29.53 rows=1 width=181) (actual time=0.014..0.054 rows=10.00 loops=1)
+  Buffers: shared hit=121
+  ->  Nested Loop  (cost=1.12..29.53 rows=1 width=181) (actual time=0.013..0.054 rows=10.00 loops=1)
+        Buffers: shared hit=121
+        ->  Nested Loop  (cost=0.84..24.90 rows=1 width=150) (actual time=0.007..0.028 rows=10.00 loops=1)
+              Buffers: shared hit=70
+              ->  Nested Loop  (cost=0.56..16.60 rows=1 width=96) (actual time=0.006..0.018 rows=10.00 loops=1)
+                    Buffers: shared hit=40
+                    ->  Index Scan using approval_steps_pending_queue_idx on approval_steps s  (cost=0.27..8.29 rows=1 width=84) (actual time=0.003..0.005 rows=10.00 loops=1)
+                          Index Cond: ((approver_id = '01a144b8-1506-792a-8df4-c3988ed4bce2'::uuid) AND (activated_at >= '2026-09-16 18:30:00+00'::timestamp with time zone) AND (activated_at < '2026-10-16 18:30:00+00'::timestamp with time zone))
+                          Index Searches: 1
+                          Buffers: shared hit=10
+                    ->  Index Scan using claim_submissions_id_claim_id_key on claim_submissions sub  (cost=0.29..8.30 rows=1 width=28) (actual time=0.001..0.001 rows=1.00 loops=10)
+                          Index Cond: (id = s.submission_id)
+                          Index Searches: 10
+                          Buffers: shared hit=30
+              ->  Index Scan using claims_pkey on claims c  (cost=0.29..8.30 rows=1 width=70) (actual time=0.001..0.001 rows=1.00 loops=10)
+                    Index Cond: (id = s.claim_id)
+                    Index Searches: 10
+                    Buffers: shared hit=30
+        ->  Index Scan using users_pkey on users u  (cost=0.27..0.30 rows=1 width=29) (actual time=0.001..0.001 rows=1.00 loops=10)
+              Index Cond: (id = c.claimant_id)
+              Index Searches: 10
+              Buffers: shared hit=30
+        SubPlan 1
+          ->  Aggregate  (cost=4.31..4.32 rows=1 width=4) (actual time=0.001..0.001 rows=1.00 loops=10)
+                Buffers: shared hit=21
+                ->  Index Only Scan using approval_steps_submission_id_approver_id_key on approval_steps x  (cost=0.29..4.30 rows=1 width=0) (actual time=0.001..0.001 rows=1.20 loops=10)
+                      Index Cond: (submission_id = s.submission_id)
+                      Heap Fetches: 0
+                      Index Searches: 10
+                      Buffers: shared hit=21
+Planning:
+  Buffers: shared hit=33
+Planning Time: 0.341 ms
+Execution Time: 0.094 ms
