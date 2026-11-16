@@ -7,7 +7,7 @@ import { RECEIPT_MAX_BYTES } from '@/shared/policy';
 // already required multipart/form-data (415); this reads the body without ever buffering more
 // than the cap, whatever Content-Length says (or doesn't).
 
-/** The file (10 MiB) plus room for the multipart framing (D-30: 10 MiB + 64 KiB). */
+/** The file (default 10 MiB, see policy.ts) plus room for the framing (D-30: 64 KiB). */
 export const RECEIPT_REQUEST_MAX_BYTES = RECEIPT_MAX_BYTES + 64 * 1024;
 
 const shapeError = (message: string, cause?: unknown) =>

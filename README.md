@@ -102,6 +102,9 @@ the text before the inline `#` comment). The login page does not list the accoun
 The seeded claims C01–C12 (draft, in approval, approved, rejected, recalled, the IST month
 boundary pair, the fallback route) are listed in [docs/demo-script.md](docs/demo-script.md#seeded-data).
 
+To host a free demo on Vercel, Neon and Tigris instead of Docker, follow
+[docs/deploy-vercel-free.md](docs/deploy-vercel-free.md).
+
 ## Application flow
 
 ```mermaid

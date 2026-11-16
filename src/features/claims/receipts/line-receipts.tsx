@@ -13,6 +13,7 @@ import {
   describeReceiptError,
   LIMIT_COPY,
   RECEIPT_ACCEPT,
+  RECEIPT_MAX_LABEL,
 } from '@/features/claims/receipts/upload';
 import { ApiError } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
@@ -28,7 +29,7 @@ export interface ReceiptSlotProps {
   n: number;
 }
 
-const HINT = 'JPEG, PNG, WebP or PDF, up to 10 MB';
+const HINT = `JPEG, PNG, WebP or PDF, up to ${RECEIPT_MAX_LABEL}`;
 
 function ReceiptsLabel({ id, n }: { id?: string; n: number }) {
   return (

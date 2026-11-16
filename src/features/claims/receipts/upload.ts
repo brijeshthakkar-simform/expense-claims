@@ -81,7 +81,9 @@ export async function uploadReceipt(
 // Copy
 
 const TYPE_COPY = 'Only JPEG, PNG, WebP or PDF receipts are accepted.';
-const SIZE_COPY = 'This file is too large. Receipts must be 10 MB or smaller.';
+/** The cap as people read it ("10 MB"): MiB rounded down to a tenth, so it never overpromises. */
+export const RECEIPT_MAX_LABEL = `${Math.floor((RECEIPT_MAX_BYTES / 1_048_576) * 10) / 10} MB`;
+const SIZE_COPY = `This file is too large. Receipts must be ${RECEIPT_MAX_LABEL} or smaller.`;
 export const LIMIT_COPY = `A line item can have at most ${MAX_RECEIPTS_PER_LINE} receipts.`;
 
 /**

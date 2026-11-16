@@ -14,7 +14,18 @@ export const MERCHANT_MAX = 120;
 export const REJECT_REASON_LENGTH = { min: 10, max: 1000 } as const;
 export const APPROVE_COMMENT_MAX = 1000;
 export const RECALL_NOTE_MAX = 500;
-export const RECEIPT_MAX_BYTES = 10_485_760; // 10 MiB
+/** receipts_size_range allows 1..10485760 bytes: a lower limit is legal, a higher one is not. */
+const RECEIPT_MAX_BYTES_CEILING = 10_485_760; // 10 MiB
+/** A plain base-10 integer in 1..ceiling, else the ceiling: a bad value never breaks the build. */
+function parseReceiptMaxBytes(raw: string | undefined): number {
+  if (raw === undefined || !/^[1-9]\d*$/.test(raw)) return RECEIPT_MAX_BYTES_CEILING;
+  const bytes = Number(raw);
+  return bytes <= RECEIPT_MAX_BYTES_CEILING ? bytes : RECEIPT_MAX_BYTES_CEILING;
+}
+// Vercel rejects request bodies over 4.5 MB (413), so that build sets this lower (next.config.ts).
+// Read as a literal `process.env.NEXT_PUBLIC_*` so Next inlines it at build time into both the
+// client and server bundles; `process.env[name]` would not be inlined.
+export const RECEIPT_MAX_BYTES = parseReceiptMaxBytes(process.env.NEXT_PUBLIC_RECEIPT_MAX_BYTES);
 export const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'] as const;
 export const MAX_RECEIPTS_PER_LINE = 5;
 export const EXPORT_MAX_RANGE_DAYS = 366;

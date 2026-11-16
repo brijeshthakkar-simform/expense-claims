@@ -6,10 +6,11 @@ import { LineItemReceiptsParams } from '@/shared/schemas/claims';
 
 /**
  * POST /api/v1/claims/:claimId/line-items/:lineItemId/receipts → 201 `{ data: ReceiptDto }`.
- * multipart/form-data with a single `file` (≤ 10 MiB; JPEG, PNG, WEBP or PDF, proven by magic
- * bytes) on a line of my DRAFT/REJECTED claim. 404 CLAIM_NOT_FOUND / LINE_ITEM_NOT_FOUND; 409
- * CLAIM_NOT_EDITABLE / CLAIM_LOCKED; 413 PAYLOAD_TOO_LARGE; 415; 422 RECEIPT_TYPE_NOT_ALLOWED /
- * RECEIPT_LIMIT_REACHED / VALIDATION_FAILED; 503 when the object store is down.
+ * multipart/form-data with a single `file` (≤ default 10 MiB, see policy.ts; JPEG, PNG, WEBP or
+ * PDF, proven by magic bytes) on a line of my DRAFT/REJECTED claim. 404 CLAIM_NOT_FOUND /
+ * LINE_ITEM_NOT_FOUND; 409 CLAIM_NOT_EDITABLE / CLAIM_LOCKED; 413 PAYLOAD_TOO_LARGE; 415; 422
+ * RECEIPT_TYPE_NOT_ALLOWED / RECEIPT_LIMIT_REACHED / VALIDATION_FAILED; 503 when the object store
+ * is down.
  */
 export const POST = defineRoute({
   auth: 'required',
